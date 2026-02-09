@@ -1,112 +1,203 @@
 #include "oqs-provider.h"
-#include <oqs/oqs.h>
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <cmake-build-debug/vcpkg_installed/x64-windows/include/openssl/core_names.h>
+#include <openssl/core.h>
+#include <openssl/core_dispatch.h>
+#include <openssl/params.h>
 
-// 算法信息结构
+// 声明外部函数分发表
+extern const OSSL_DISPATCH oqs_kem_functions[];
+extern const OSSL_DISPATCH oqs_sig_functions[];
+
+// Provider 上下文
 typedef struct {
-    const char *name;
-    int is_kem;  // 1 for KEM, 0 for signature
-    int enabled;
-} oqs_algorithm;
+    OSSL_CORE_HANDLE *handle;
+    int initialized;
+} oqs_provider_ctx;
 
-// 支持的算法列表
-static oqs_algorithm supported_algorithms[] = {
-    {OQS_ALG_MLKEM512, 1, 0},
-    {OQS_ALG_MLKEM768, 1, 0},
-    {OQS_ALG_MLKEM1024, 1, 0},
-    {OQS_ALG_MLDSA44, 0, 0},
-    {OQS_ALG_MLDSA65, 0, 0},
-    {OQS_ALG_MLDSA87, 0, 0},
-    {NULL, 0, 0}
+// 算法表
+static const OSSL_ALGORITHM kem_algs[] = {
+    {
+        OQS_ALG_MLKEM512,
+        "provider=" OQS_PROVIDER_NAME,
+        oqs_kem_functions,
+        "ML-KEM-512 Post-Quantum Key Encapsulation"
+    },
+    {
+        OQS_ALG_MLKEM768,
+        "provider=" OQS_PROVIDER_NAME,
+        oqs_kem_functions,
+        "ML-KEM-768 Post-Quantum Key Encapsulation"
+    },
+    {
+        OQS_ALG_MLKEM1024,
+        "provider=" OQS_PROVIDER_NAME,
+        oqs_kem_functions,
+        "ML-KEM-1024 Post-Quantum Key Encapsulation"
+    },
+    { NULL, NULL, NULL, NULL }
 };
 
-// 检查算法是否启用
-static void check_algorithms() {
-    for (int i = 0; supported_algorithms[i].name != NULL; i++) {
-        if (supported_algorithms[i].is_kem) {
-            supported_algorithms[i].enabled =
-                OQS_KEM_alg_is_enabled(supported_algorithms[i].name);
-        } else {
-            supported_algorithms[i].enabled =
-                OQS_SIG_alg_is_enabled(supported_algorithms[i].name);
-        }
+static const OSSL_ALGORITHM sig_algs[] = {
+    {
+        OQS_ALG_MLDSA44,
+        "provider=" OQS_PROVIDER_NAME,
+        oqs_sig_functions,
+        "ML-DSA-44 Post-Quantum Signature"
+    },
+    {
+        OQS_ALG_MLDSA65,
+        "provider=" OQS_PROVIDER_NAME,
+        oqs_sig_functions,
+        "ML-DSA-65 Post-Quantum Signature"
+    },
+    {
+        OQS_ALG_MLDSA87,
+        "provider=" OQS_PROVIDER_NAME,
+        oqs_sig_functions,
+        "ML-DSA-87 Post-Quantum Signature"
+    },
+    { NULL, NULL, NULL, NULL }
+};
 
-        printf("OQS Provider: Algorithm %s is %s\n",
-               supported_algorithms[i].name,
-               supported_algorithms[i].enabled ? "enabled" : "disabled");
-    }
-}
+// 查询操作 - 修复操作 ID 处理
+static const OSSL_ALGORITHM *oqs_query(void *provctx, int operation_id, int *no_cache)
+{
+    (void)provctx; // 未使用参数
 
-// 查询操作
-static const OSSL_ALGORITHM *oqs_query(void *provctx, int operation_id,
-                                       int *no_cache) {
-    (void)provctx;  // 未使用参数
-    *no_cache = 0;
+    // 必须设置no_cache=1，否则算法数组会被丢弃
+    *no_cache = 1;
 
-    // 这里我们返回一个简单的算法列表
-    // 注意：OpenSSL 3.x 的 API 有变化，我们使用更简单的方法
+    printf("OQS Provider: Query operation %d\n", operation_id);
 
-    static OSSL_ALGORITHM kem_algs[] = {
-        {OQS_ALG_MLKEM512, "provider=oqsprovider", NULL},
-        {OQS_ALG_MLKEM768, "provider=oqsprovider", NULL},
-        {OQS_ALG_MLKEM1024, "provider=oqsprovider", NULL},
-        {NULL, NULL, NULL}
-    };
-
-    static OSSL_ALGORITHM sig_algs[] = {
-        {OQS_ALG_MLDSA44, "provider=oqsprovider", NULL},
-        {OQS_ALG_MLDSA65, "provider=oqsprovider", NULL},
-        {OQS_ALG_MLDSA87, "provider=oqsprovider", NULL},
-        {NULL, NULL, NULL}
-    };
-
-    // 检查算法启用状态
-    check_algorithms();
-
-    // 根据操作类型返回不同的算法列表
+    // 处理支持的操作 ID
     switch (operation_id) {
-        case 1:  // 密钥交换操作
+        case OSSL_OP_KEM:
+            printf("OQS Provider: Returning KEM algorithms\n");
             return kem_algs;
-        case 2:  // 签名操作
+        case OSSL_OP_SIGNATURE:
+            printf("OQS Provider: Returning signature algorithms\n");
             return sig_algs;
         default:
+            // 对于不支持的操作，静默返回 NULL
+            // OpenSSL 会查询多个操作 ID，这是正常的
             return NULL;
     }
 }
 
-// Provider 卸载
-static int oqs_teardown(void *provctx) {
-    (void)provctx;
-    printf("OQS Provider: Shutting down...\n");
-
-    return 1;
+// Provider卸载函数
+static void oqs_teardown(void *provctx)
+{
+    oqs_provider_ctx *ctx = (oqs_provider_ctx *)provctx;
+    if (ctx) {
+        printf("OQS Provider: Shutting down\n");
+        free(ctx);
+    }
 }
 
-// Provider 分发表
+// 修复参数查询函数
+static const OSSL_PARAM *oqs_gettable_params(void *provctx)
+{
+    (void)provctx; // 未使用参数
+
+    static const OSSL_PARAM param_table[] = {
+        OSSL_PARAM_DEFN(OSSL_PROV_PARAM_NAME, OSSL_PARAM_UTF8_PTR, NULL, 0),
+        OSSL_PARAM_DEFN(OSSL_PROV_PARAM_VERSION, OSSL_PARAM_UTF8_PTR, NULL, 0),
+        OSSL_PARAM_DEFN(OSSL_PROV_PARAM_BUILDINFO, OSSL_PARAM_UTF8_PTR, NULL, 0),
+        OSSL_PARAM_DEFN(OSSL_PROV_PARAM_STATUS, OSSL_PARAM_INTEGER, NULL, 0),
+        OSSL_PARAM_END
+    };
+    return param_table;
+}
+
+static int oqs_get_params(void *provctx, OSSL_PARAM params[])
+{
+    oqs_provider_ctx *ctx = (oqs_provider_ctx *)provctx;
+    OSSL_PARAM *p;
+    int ret = 1;
+
+    (void)ctx;
+
+    p = OSSL_PARAM_locate(params, OSSL_PROV_PARAM_NAME);
+    if (p != NULL) {
+        if (!OSSL_PARAM_set_utf8_ptr(p, OQS_PROVIDER_NAME)) {
+            ret = 0;
+        }
+    }
+
+    p = OSSL_PARAM_locate(params, OSSL_PROV_PARAM_VERSION);
+    if (p != NULL) {
+        if (!OSSL_PARAM_set_utf8_ptr(p, OQS_PROVIDER_VERSION)) {
+            ret = 0;
+        }
+    }
+
+    p = OSSL_PARAM_locate(params, OSSL_PROV_PARAM_BUILDINFO);
+    if (p != NULL) {
+        if (!OSSL_PARAM_set_utf8_ptr(p, "OQS Provider with liboqs")) {
+            ret = 0;
+        }
+    }
+
+    return ret;
+}
+
+// Provider分发表
 static const OSSL_DISPATCH oqs_dispatch_table[] = {
-    { 1, (void (*)(void))oqs_teardown },        // OSSL_FUNC_PROVIDER_TEARDOWN
-    { 10, (void (*)(void))oqs_query },          // OSSL_FUNC_PROVIDER_QUERY_OPERATION
+    { OSSL_FUNC_PROVIDER_TEARDOWN, (void (*)(void))oqs_teardown },
+    { OSSL_FUNC_PROVIDER_QUERY_OPERATION, (void (*)(void))oqs_query },
+    { OSSL_FUNC_PROVIDER_GETTABLE_PARAMS, (void (*)(void))oqs_gettable_params },
+    { OSSL_FUNC_PROVIDER_GET_PARAMS, (void (*)(void))oqs_get_params },
     { 0, NULL }
 };
 
-// Provider 初始化函数
+// Provider初始化函数
 int OSSL_provider_init(const OSSL_CORE_HANDLE *handle,
                       const OSSL_DISPATCH *in,
                       const OSSL_DISPATCH **out,
-                      void **provctx) {
-    (void)handle;
-    (void)in;
-    (void)provctx;
+                      void **provctx)
+{
+    printf("=== OQS PROVIDER INIT (OpenSSL 3.x Compatible) ===\n");
 
-    printf("Initializing OQS Provider v%s...\n", OQS_PROVIDER_VERSION);
+    // 记录传入的调度表（可选，用于调试）
+    if (in != NULL) {
+        printf("Received %zu dispatch entries\n", (size_t)(in - in));
+        // 可以遍历调度表来了解可用的核心函数
+        const OSSL_DISPATCH *dispatch = in;
+        while (dispatch->function_id != 0) {
+            printf("Available core function: %d\n", dispatch->function_id);
+            dispatch++;
+        }
+    }
 
-    // 初始化 liboqs
-    OQS_init();
+    // 验证输入参数
+    if (handle == NULL || out == NULL || provctx == NULL) {
+        printf("❌ Invalid parameters provided to OSSL_provider_init\n");
+        return 0;
+    }
 
+    // 分配Provider上下文
+    oqs_provider_ctx *ctx = calloc(1, sizeof(oqs_provider_ctx));
+    if (!ctx) {
+        printf("❌ Failed to allocate provider context\n");
+        return 0;
+    }
+
+    // 初始化上下文
+    ctx->handle = (OSSL_CORE_HANDLE *)handle;
+    ctx->initialized = 1;
+
+    // 设置输出参数
     *out = oqs_dispatch_table;
+    *provctx = ctx;
 
-    printf("OQS Provider initialized successfully\n");
+    // 记录初始化成功信息
+    printf("✅ OQS Provider %s initialized successfully\n", OQS_PROVIDER_VERSION);
+    printf("Provider name: %s\n", OQS_PROVIDER_NAME);
+    printf("Provider handle: %p\n", (void*)handle);
+
     return 1;
 }
+// /mnt/c/Users/22126/CLionProjects/oqs-provider/cmake-build-debug-wsl/lib/oqs-provider.cnf

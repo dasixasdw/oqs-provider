@@ -1,0 +1,21 @@
+{
+  "name" : "oqs-provider",
+  "version-string" : "1.0.0",
+  "builtin-baseline" : "66c0373dc7fca549e5803087b9487edfe3aca0a1",
+  "dependencies" : [ {
+    "name" : "liboqs",
+    "version>=" : "0.15.0"
+  }, {
+    "name" : "openssl",
+    "version>=" : "3.6.0#3"
+  }, {
+    "name" : "vcpkg-cmake-config",
+    "version>=" : "2024-05-23"
+  }, {
+    "name" : "vcpkg-cmake-get-vars",
+    "version>=" : "2025-05-29"
+  }, {
+    "name" : "vcpkg-cmake",
+    "version>=" : "2024-04-23"
+  } ]
+}

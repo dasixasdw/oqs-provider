@@ -161,7 +161,7 @@ int OSSL_provider_init(const OSSL_CORE_HANDLE *handle,
 {
     printf("=== OQS PROVIDER INIT (OpenSSL 3.x Compatible) ===\n");
 
-    // 记录传入的调度表（可选，用于调试）
+    // 记录传入的调度表
     if (in != NULL) {
         printf("Received %zu dispatch entries\n", (size_t)(in - in));
         // 可以遍历调度表来了解可用的核心函数
@@ -200,4 +200,4 @@ int OSSL_provider_init(const OSSL_CORE_HANDLE *handle,
 
     return 1;
 }
-// /mnt/c/Users/22126/CLionProjects/oqs-provider/cmake-build-debug-wsl/lib/oqs-provider.cnf
+//
